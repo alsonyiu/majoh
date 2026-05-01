@@ -1,0 +1,19 @@
+{
+  "name": "麻雀計番計分",
+  "short_name": "麻雀計番",
+  "description": "廣東牌 / 港式台牌 計分 + AI 影相識別計番",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f1714",
+  "theme_color": "#0f5132",
+  "lang": "zh-Hant-HK",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

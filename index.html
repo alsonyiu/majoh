@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-HK">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#0f5132" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="麻雀計番" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="styles.css" />
+  <title>麻雀計番計分</title>
+</head>
+<body>
+  <header class="app-header">
+    <h1 id="header-title">計分</h1>
+    <div class="header-right">
+      <span id="rule-badge" class="badge">廣東牌</span>
+    </div>
+  </header>
+
+  <main id="app-main">
+
+    <!-- ============== TAB: 計分 ============== -->
+    <section class="tab-pane active" id="tab-score">
+      <div id="score-empty" class="empty-state hidden">
+        <div class="empty-icon">🀄</div>
+        <p>仲未開始,撳「新一局」開波</p>
+        <button class="btn btn-primary" id="btn-new-game">新一局</button>
+      </div>
+
+      <div id="score-board" class="score-board hidden">
+        <div class="score-board-header">
+          <div class="game-info">
+            <span id="game-round-label">東 1 局</span>
+            <span class="dot">·</span>
+            <span id="game-hand-count">0 鋪</span>
+          </div>
+          <button class="icon-btn" id="btn-game-menu" title="本局選項">⋯</button>
+        </div>
+
+        <div class="players-grid" id="players-grid">
+          <!-- 4 player cards injected by JS -->
+        </div>
+
+        <div class="action-bar">
+          <button class="btn btn-primary big" id="btn-add-hand">＋ 加一鋪</button>
+          <button class="btn btn-secondary" id="btn-undo-hand">↶ 撤回</button>
+        </div>
+
+        <div class="rounds-section">
+          <h3>本局記錄</h3>
+          <div id="rounds-list" class="rounds-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============== TAB: 影相計番 ============== -->
+    <section class="tab-pane" id="tab-camera">
+      <div class="camera-intro">
+        <h2>影相計番</h2>
+        <p class="muted">影張你嘅手牌相,AI 識牌之後即時計番數同顯示計法</p>
+      </div>
+
+      <div class="camera-actions">
+        <label class="btn btn-primary big">
+          📷 影相 / 揀相
+          <input type="file" accept="image/*" capture="environment" id="photo-input" hidden />
+        </label>
+        <button class="btn btn-ghost" id="btn-demo-tiles">🎲 用示範牌</button>
+      </div>
+
+      <div id="photo-preview-wrap" class="hidden">
+        <img id="photo-preview" alt="預覽" />
+        <div id="photo-status" class="muted small">等緊識別…</div>
+      </div>
+
+      <div id="recognized-tiles" class="recognized-tiles hidden">
+        <h3>識別到嘅牌</h3>
+        <div class="tiles-row" id="tiles-display"></div>
+        <div class="tiles-meta" id="tiles-meta"></div>
+        <button class="btn btn-ghost small" id="btn-edit-tiles">手動修正</button>
+      </div>
+
+      <div id="fan-result" class="fan-result hidden">
+        <div class="fan-summary">
+          <div class="fan-big">
+            <span id="fan-total">0</span>
+            <span class="fan-unit" id="fan-unit">番</span>
+          </div>
+          <div class="fan-status" id="fan-status">—</div>
+        </div>
+
+        <h3>計法</h3>
+        <ul id="fan-breakdown" class="fan-breakdown"></ul>
+
+        <div class="fan-actions">
+          <button class="btn btn-secondary" id="btn-apply-to-game">寫入今鋪</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============== TAB: 記錄 ============== -->
+    <section class="tab-pane" id="tab-history">
+      <h2>過往牌局</h2>
+      <div id="history-list" class="history-list">
+        <div class="empty-state small">仲未有任何完結嘅牌局</div>
+      </div>
+    </section>
+
+    <!-- ============== TAB: 設定 ============== -->
+    <section class="tab-pane" id="tab-settings">
+      <h2>設定</h2>
+
+      <div class="setting-group">
+        <h3>規則</h3>
+        <div class="seg-control" data-setting="rules">
+          <button data-value="canto" class="seg active">廣東牌 (13 張)</button>
+          <button data-value="taiwan">港式台牌 (16 張)</button>
+        </div>
+      </div>
+
+      <div class="setting-group">
+        <h3>底數同上限</h3>
+        <label class="row">
+          <span>每番底 (元)</span>
+          <input type="number" id="set-base" min="0.1" step="0.5" />
+        </label>
+        <label class="row">
+          <span>起糊 (最少 <span class="unit-label">番/台</span>)</span>
+          <input type="number" id="set-min-fan" min="0" step="1" />
+        </label>
+        <label class="row">
+          <span>滿糊 (上限 <span class="unit-label">番/台</span>)</span>
+          <input type="number" id="set-max-fan" min="1" step="1" />
+        </label>
+        <label class="row">
+          <span>自摸雙計</span>
+          <input type="checkbox" id="set-zimo-double" />
+        </label>
+      </div>
+
+      <div class="setting-group">
+        <h3>影相識別 (Gemini)</h3>
+        <p class="muted small">免費 API key 喺 <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">aistudio.google.com</a> 攞</p>
+        <label class="row stacked">
+          <span>Gemini API Key</span>
+          <input type="password" id="set-api-key" placeholder="AIza..." autocomplete="off" />
+        </label>
+        <label class="row">
+          <span>模型</span>
+          <select id="set-model">
+            <option value="gemini-2.0-flash">Gemini 2.0 Flash (推薦,快+免費)</option>
+            <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+            <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+          </select>
+        </label>
+        <button class="btn btn-ghost small" id="btn-test-api">測試 API</button>
+        <div id="api-test-result" class="small"></div>
+      </div>
+
+      <div class="setting-group">
+        <h3>玩家名</h3>
+        <div id="player-names-rows"></div>
+      </div>
+
+      <div class="setting-group danger">
+        <h3>清除資料</h3>
+        <button class="btn btn-danger" id="btn-clear-data">清除全部設定同記錄</button>
+      </div>
+
+      <p class="muted small center">麻雀計番計分 v0.1 · MVP prototype</p>
+    </section>
+  </main>
+
+  <nav class="bottom-nav">
+    <button class="nav-btn active" data-tab="tab-score">
+      <span class="nav-ico">🀄</span><span class="nav-lbl">計分</span>
+    </button>
+    <button class="nav-btn" data-tab="tab-camera">
+      <span class="nav-ico">📷</span><span class="nav-lbl">影相</span>
+    </button>
+    <button class="nav-btn" data-tab="tab-history">
+      <span class="nav-ico">📜</span><span class="nav-lbl">記錄</span>
+    </button>
+    <button class="nav-btn" data-tab="tab-settings">
+      <span class="nav-ico">⚙️</span><span class="nav-lbl">設定</span>
+    </button>
+  </nav>
+
+  <!-- ============== Modal: 加一鋪 ============== -->
+  <div class="modal hidden" id="modal-add-hand">
+    <div class="modal-card">
+      <header class="modal-header">
+        <h3>加一鋪</h3>
+        <button class="icon-btn" data-close-modal>✕</button>
+      </header>
+      <div class="modal-body">
+
+        <div class="field">
+          <label>類型</label>
+          <div class="seg-control" id="hand-type">
+            <button data-value="win" class="seg active">食糊</button>
+            <button data-value="zimo" class="seg">自摸</button>
+            <button data-value="draw" class="seg">流局</button>
+          </div>
+        </div>
+
+        <div class="field" id="field-winner">
+          <label>邊個糊?</label>
+          <div class="player-pick" id="pick-winner"></div>
+        </div>
+
+        <div class="field" id="field-loser">
+          <label>邊個出銃?</label>
+          <div class="player-pick" id="pick-loser"></div>
+        </div>
+
+        <div class="field" id="field-fan">
+          <label>幾多 <span class="unit-label">番/台</span>?</label>
+          <input type="number" id="hand-fan" min="0" step="1" value="3" />
+          <button class="btn btn-ghost small" id="btn-fan-from-camera">📷 用影相結果</button>
+        </div>
+
+        <div class="field hidden" id="field-flowers">
+          <label>花/季 (每張+1)</label>
+          <input type="number" id="hand-flowers" min="0" max="8" step="1" value="0" />
+        </div>
+
+        <div class="payment-preview" id="payment-preview"></div>
+      </div>
+      <footer class="modal-footer">
+        <button class="btn btn-ghost" data-close-modal>取消</button>
+        <button class="btn btn-primary" id="btn-confirm-hand">確認</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ============== Modal: 新一局 ============== -->
+  <div class="modal hidden" id="modal-new-game">
+    <div class="modal-card">
+      <header class="modal-header">
+        <h3>開新一局</h3>
+        <button class="icon-btn" data-close-modal>✕</button>
+      </header>
+      <div class="modal-body">
+        <div class="field">
+          <label>玩家名</label>
+          <div id="new-game-players"></div>
+        </div>
+        <div class="field">
+          <label>圈風</label>
+          <div class="seg-control" id="ng-prevailing">
+            <button data-value="E" class="seg active">東</button>
+            <button data-value="S" class="seg">南</button>
+            <button data-value="W" class="seg">西</button>
+            <button data-value="N" class="seg">北</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>邊個做莊?</label>
+          <div class="player-pick" id="ng-dealer"></div>
+        </div>
+      </div>
+      <footer class="modal-footer">
+        <button class="btn btn-ghost" data-close-modal>取消</button>
+        <button class="btn btn-primary" id="btn-start-game">開始</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ============== Modal: 編輯牌 ============== -->
+  <div class="modal hidden" id="modal-edit-tiles">
+    <div class="modal-card big">
+      <header class="modal-header">
+        <h3>修正牌張</h3>
+        <button class="icon-btn" data-close-modal>✕</button>
+      </header>
+      <div class="modal-body">
+        <p class="small muted">用標準寫法用空格分開,例如:<code>1m 2m 3m 5p 5p 5p E E E 7s 8s 9s C C</code><br/>
+          1-9m=萬子,1-9p=筒子,1-9s=索子,E/S/W/N=東南西北,C/F/P=中發白</p>
+        <textarea id="tiles-text" rows="3"></textarea>
+        <div class="field">
+          <label>食糊張</label>
+          <input type="text" id="tiles-winning" placeholder="例如 9s" />
+        </div>
+        <div class="field">
+          <label>係咪自摸?</label>
+          <input type="checkbox" id="tiles-zimo" />
+        </div>
+      </div>
+      <footer class="modal-footer">
+        <button class="btn btn-ghost" data-close-modal>取消</button>
+        <button class="btn btn-primary" id="btn-recalc">重新計算</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="scoring.js"></script>
+  <script src="vision.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
