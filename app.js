@@ -15,7 +15,8 @@
       maxFan: 13,
       zimoDouble: false,
       apiKey: '',
-      model: 'gemini-2.0-flash',
+      model: 'gemini-2.5-flash-lite',
+      autoFallback: true,
       playerNames: ['玩家 1', '玩家 2', '玩家 3', '玩家 4'],
     },
     game: null, // 當前牌局
@@ -68,7 +69,7 @@
   function switchTab(tabId) {
     $$('.tab-pane').forEach(p => p.classList.toggle('active', p.id === tabId));
     $$('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tabId));
-    const titles = { 'tab-score': '計分', 'tab-camera': '影相計番', 'tab-history': '記錄', 'tab-settings': '設定' };
+    const titles = { 'tab-score': '計分', 'tab-camera': '計番', 'tab-history': '記錄', 'tab-settings': '設定' };
     $('#header-title').textContent = titles[tabId] || '麻雀計番';
   }
 
@@ -84,7 +85,8 @@
     $('#set-max-fan').value = s.maxFan;
     $('#set-zimo-double').checked = !!s.zimoDouble;
     $('#set-api-key').value = s.apiKey || '';
-    $('#set-model').value = s.model || 'gemini-2.0-flash';
+    $('#set-model').value = s.model || 'gemini-2.5-flash-lite';
+    if ($('#set-auto-fallback')) $('#set-auto-fallback').checked = s.autoFallback !== false;
 
     // 玩家名
     const wrap = $('#player-names-rows');
@@ -116,9 +118,12 @@
         const def = MJ.DEFAULT_RULES[state.settings.ruleSet];
         if (state.settings.minFan < 1) state.settings.minFan = def.minWin;
         if (state.settings.maxFan < state.settings.minFan) state.settings.maxFan = def.max;
+        // 起糊 / 上限 隨規則自動更新到該規則嘅預設
+        state.settings.minFan = def.minWin;
+        state.settings.maxFan = def.max;
         saveState();
         renderSettings();
-        toast(`已切換到${def.name}`);
+        toast(`已切換到 ${def.name}(起糊 ${def.minWin} ${def.unit},滿糊 ${def.max} ${def.unit})`);
       });
     });
 
@@ -146,6 +151,12 @@
       state.settings.model = e.target.value;
       saveState();
     });
+    if ($('#set-auto-fallback')) {
+      $('#set-auto-fallback').addEventListener('change', e => {
+        state.settings.autoFallback = e.target.checked;
+        saveState();
+      });
+    }
 
     $('#player-names-rows').addEventListener('change', e => {
       if (e.target.matches('input[data-pidx]')) {
@@ -257,9 +268,6 @@
   }
 
   // ---------- 計番 → 銀碼 ----------
-  // 標準 HK 雙倍制:
-  //   每番超過起糊一番,雙倍。即係 base * 2^(fan - minFan)
-  //   超過上限 capped
   function fanToBaseUnit(fan, settings) {
     const f = Math.max(settings.minFan, Math.min(fan, settings.maxFan));
     const exp = f - settings.minFan;
@@ -272,11 +280,9 @@
     const totalFan = fan + (flowers || 0);
     const unit = fanToBaseUnit(totalFan, settings);
     if (type === 'win') {
-      // 食糊:放炮者賠
       payments[loserIdx] -= unit;
       payments[winnerIdx] += unit;
     } else if (type === 'zimo') {
-      // 自摸:三家齊出 (預設);自摸雙計再 ×2
       const zimoMul = settings.zimoDouble ? 2 : 1;
       const each = unit * zimoMul;
       for (let i = 0; i < 4; i++) {
@@ -302,7 +308,6 @@
       inputs.appendChild(inp);
     });
 
-    // Dealer picker
     const pick = $('#ng-dealer'); pick.innerHTML = '';
     state.settings.playerNames.forEach((n, i) => {
       const b = document.createElement('button');
@@ -316,14 +321,12 @@
       pick.appendChild(b);
     });
 
-    // Wind seg
     $$('#ng-prevailing .seg').forEach(b => b.classList.toggle('active', b.dataset.value === 'E'));
 
     openModal('modal-new-game');
   }
 
   function startNewGame() {
-    // 收集
     $$('#new-game-players input').forEach(inp => {
       const i = +inp.dataset.pidx;
       state.settings.playerNames[i] = inp.value.trim() || `玩家 ${i + 1}`;
@@ -331,7 +334,6 @@
     const prevailing = ($$('#ng-prevailing .seg.active')[0] || {}).dataset?.value || 'E';
     const dealerIdx = +($$('#ng-dealer button.active')[0] || {}).dataset?.idx || 0;
 
-    // 如果有未完結牌局,存入 history
     if (state.game && state.game.rounds.length > 0) {
       state.history.unshift({
         ...state.game,
@@ -366,7 +368,6 @@
       fan: state.settings.minFan,
       flowers: 0,
     };
-    // Render player picks
     const pickW = $('#pick-winner'); pickW.innerHTML = '';
     const pickL = $('#pick-loser'); pickL.innerHTML = '';
     for (let i = 0; i < 4; i++) {
@@ -453,7 +454,7 @@
     });
     $('#btn-fan-from-camera').addEventListener('click', () => {
       const r = state.lastRecognition;
-      if (!r || !r.fanResult) { toast('未有影相結果。請先去「影相」'); return; }
+      if (!r || !r.fanResult) { toast('未有計番結果。請先去「計番」'); return; }
       $('#hand-fan').value = r.fanResult.total;
       handDraft.fan = r.fanResult.total;
       updatePaymentPreview();
@@ -477,10 +478,6 @@
         timestamp: Date.now(),
       };
       state.game.rounds.push(round);
-      // 自動轉莊:如果非莊家糊或流局
-      if (t === 'draw' || (t !== 'draw' && handDraft.winnerIdx !== state.game.dealerIdx)) {
-        // 留番俾用戶手動處理,簡化版唔自動轉
-      }
       saveState();
       closeModal();
       renderScoreBoard();
@@ -496,6 +493,65 @@
     renderScoreBoard();
   }
 
+  // ---------- 手動輸入牌張 modal ----------
+  function openManualEditModal(presetTiles, presetWin, presetZimo, title) {
+    $('#edit-tiles-title').textContent = title || '手動輸入牌張';
+    $('#tiles-text').value = (presetTiles || []).join(' ');
+    $('#tiles-winning').value = presetWin || '';
+    $('#tiles-zimo').checked = !!presetZimo;
+    updateTilesCount();
+    openModal('modal-edit-tiles');
+  }
+
+  function buildTilePicker() {
+    const tilesSets = {
+      'tp-m': ['1m', '2m', '3m', '4m', '5m', '6m', '7m', '8m', '9m'],
+      'tp-p': ['1p', '2p', '3p', '4p', '5p', '6p', '7p', '8p', '9p'],
+      'tp-s': ['1s', '2s', '3s', '4s', '5s', '6s', '7s', '8s', '9s'],
+      'tp-z': ['E', 'S', 'W', 'N', 'C', 'F', 'P'],
+      'tp-flower': ['f1', 'f2', 'f3', 'f4', 's1', 's2', 's3', 's4'],
+    };
+    for (const [rowId, tiles] of Object.entries(tilesSets)) {
+      const row = $('#' + rowId);
+      if (!row) continue;
+      row.innerHTML = '';
+      for (const t of tiles) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'tile';
+        if (MJ.isHonorTile(t)) b.classList.add('honor');
+        if (MJ.isFlowerTile(t)) b.classList.add('flower');
+        b.textContent = MJ.TILE_DISPLAY[t] || t;
+        b.dataset.tile = t;
+        b.addEventListener('click', () => {
+          const ta = $('#tiles-text');
+          const cur = ta.value.trim();
+          ta.value = cur ? `${cur} ${t}` : t;
+          updateTilesCount();
+        });
+        row.appendChild(b);
+      }
+    }
+  }
+
+  function updateTilesCount() {
+    const tiles = MJ.parseTilesFromText($('#tiles-text').value);
+    const handCount = tiles.filter(t => !MJ.isFlowerTile(t)).length;
+    const flowerCount = tiles.filter(t => MJ.isFlowerTile(t)).length;
+    const need = state.settings.ruleSet === 'taiwan' ? 17 : 14;
+    const ok = handCount === need;
+    $('#tiles-count').textContent = `${handCount}/${need} 張` +
+      (flowerCount ? ` · ${flowerCount} 張花` : '') +
+      (ok ? ' ✓' : '');
+    $('#tiles-count').style.color = ok ? 'var(--primary)' : '';
+    const hint = $('#tiles-hint');
+    if (hint) {
+      hint.innerHTML = state.settings.ruleSet === 'taiwan'
+        ? `港式台牌:總共 17 張(包食糊張、5 副 3 張 + 1 對)。<br/>撳下面個牌張就會加入手牌,撳兩下加 2 張,如此類推。`
+        : `廣東牌:總共 14 張(包食糊張、4 副 3 張 + 1 對)。<br/>撳下面個牌張就會加入手牌,撳兩下加 2 張,如此類推。`;
+    }
+  }
+
   // ---------- Modal ----------
   function openModal(id) { $('#' + id).classList.remove('hidden'); }
   function closeModal() { $$('.modal').forEach(m => m.classList.add('hidden')); }
@@ -504,7 +560,7 @@
     $$('.modal').forEach(m => m.addEventListener('click', e => { if (e.target === m) closeModal(); }));
   }
 
-  // ---------- 影相 ----------
+  // ---------- 影相 / 計番 ----------
   function bindCamera() {
     $('#photo-input').addEventListener('change', async e => {
       const f = e.target.files && e.target.files[0];
@@ -520,12 +576,21 @@
         if (!state.settings.apiKey) {
           throw new Error('未設定 API key,去「設定」入面填好佢先');
         }
-        const recog = await Vision.recognizeTiles(f, state.settings.apiKey, state.settings.model);
-        $('#photo-status').textContent = `識別完成 (信心:${recog.confidence})`;
+        const recog = await Vision.recognizeTiles(f, state.settings.apiKey, state.settings.model, {
+          autoFallback: state.settings.autoFallback !== false,
+          onAttempt: (m) => { $('#photo-status').textContent = `識別中… (model: ${m})`; },
+        });
+        let suffix = '';
+        if (recog._modelUsed && recog._modelUsed !== state.settings.model) {
+          suffix = ` · 用咗 fallback model:${recog._modelUsed}`;
+        }
+        $('#photo-status').textContent = `識別完成 (信心:${recog.confidence})${suffix}`;
         showRecognizedAndScore(recog);
       } catch (err) {
-        $('#photo-status').textContent = '識別失敗:' + err.message;
-        toast('識別失敗,可以試「示範牌」或者手動修正');
+        // 多行錯誤訊息要顯示 — 用 textContent 唔會處理 \n,改用 pre-wrap
+        $('#photo-status').style.whiteSpace = 'pre-wrap';
+        $('#photo-status').textContent = '識別失敗:\n' + err.message;
+        toast('識別失敗,可以試「手動輸入」');
       }
     });
 
@@ -549,29 +614,48 @@
 
     $('#btn-edit-tiles').addEventListener('click', () => {
       const r = state.lastRecognition;
-      if (!r) return;
-      $('#tiles-text').value = r.recognized.tiles.map(t => t).join(' ');
-      $('#tiles-winning').value = r.recognized.winningTile || '';
-      $('#tiles-zimo').checked = !!r.recognized.isZimo;
-      openModal('modal-edit-tiles');
+      const presetTiles = r ? [...r.recognized.tiles, ...(r.recognized.flowers || [])] : [];
+      const presetWin = r ? r.recognized.winningTile : '';
+      const presetZimo = r ? !!r.recognized.isZimo : false;
+      openManualEditModal(presetTiles, presetWin, presetZimo, '修正牌張');
     });
+
+    $('#btn-manual-input').addEventListener('click', () => {
+      openManualEditModal([], '', false, '手動輸入牌張');
+    });
+
+    // Tile picker buttons
+    buildTilePicker();
+    $('#btn-tile-clear').addEventListener('click', () => {
+      $('#tiles-text').value = '';
+      updateTilesCount();
+    });
+    $('#btn-tile-back').addEventListener('click', () => {
+      const ta = $('#tiles-text');
+      const tokens = ta.value.trim().split(/\s+/).filter(Boolean);
+      tokens.pop();
+      ta.value = tokens.join(' ');
+      updateTilesCount();
+    });
+    $('#tiles-text').addEventListener('input', updateTilesCount);
 
     $('#btn-recalc').addEventListener('click', () => {
       const tiles = MJ.parseTilesFromText($('#tiles-text').value);
-      const winningTile = MJ.parseTilesFromText($('#tiles-winning').value)[0];
+      const winningTileRaw = MJ.parseTilesFromText($('#tiles-winning').value)[0];
       const isZimo = $('#tiles-zimo').checked;
       if (tiles.length === 0) { toast('讀唔到任何牌'); return; }
+      const flowers = tiles.filter(t => MJ.isFlowerTile(t));
+      const handTiles = tiles.filter(t => !MJ.isFlowerTile(t));
       const recog = {
-        tiles,
+        tiles: handTiles,
         melds: [],
-        flowers: tiles.filter(t => MJ.isFlowerTile(t)),
-        winningTile: winningTile || tiles[tiles.length - 1],
+        flowers,
+        winningTile: winningTileRaw || handTiles[handTiles.length - 1],
         isZimo,
         confidence: 'manual',
       };
-      // 由 tiles 入面拎走 flowers
-      recog.tiles = tiles.filter(t => !MJ.isFlowerTile(t));
       closeModal();
+      $('#photo-preview-wrap').classList.add('hidden');
       showRecognizedAndScore(recog);
     });
 
@@ -584,7 +668,6 @@
       }
       switchTab('tab-score');
       openAddHandModal();
-      // 預填番數
       const r = state.lastRecognition;
       if (r && r.fanResult) {
         $('#hand-fan').value = r.fanResult.total;
@@ -597,7 +680,6 @@
   }
 
   function showRecognizedAndScore(recog) {
-    // 顯示牌
     const $row = $('#tiles-display'); $row.innerHTML = '';
     const sorted = MJ.sortTiles(recog.tiles);
     for (const t of sorted) {
@@ -609,7 +691,6 @@
       el.textContent = MJ.TILE_DISPLAY[t] || t;
       $row.appendChild(el);
     }
-    // 副露
     if (recog.melds && recog.melds.length > 0) {
       for (const m of recog.melds) {
         const wrap = document.createElement('span');
@@ -626,7 +707,6 @@
         $row.appendChild(wrap);
       }
     }
-    // 花
     if (recog.flowers && recog.flowers.length > 0) {
       const wrap = document.createElement('span');
       wrap.style.marginLeft = '8px';
@@ -645,7 +725,6 @@
       (recog.demoName ? ` · ${recog.demoName}` : '');
     $('#recognized-tiles').classList.remove('hidden');
 
-    // 計番:確保食糊張喺 tiles 入面
     const seatWind = recog.seatWind || (state.game ? seatWindOf(0, state.game.dealerIdx) : 'E');
     const prevailingWind = recog.prevailingWind || (state.game ? state.game.prevailingWind : 'E');
     const tilesIncluding = recog.tiles.includes(recog.winningTile)
@@ -755,7 +834,6 @@
     updateRuleBadgeAndLabels();
   }
 
-  // ---------- PWA 註冊 service worker ----------
   function registerSW() {
     if ('serviceWorker' in navigator && location.protocol !== 'file:') {
       navigator.serviceWorker.register('sw.js').catch(e => console.warn('SW reg failed', e));
@@ -771,8 +849,6 @@
     bindCamera();
     renderAll();
     registerSW();
-
-    // 預設 tab
     switchTab('tab-score');
   }
 

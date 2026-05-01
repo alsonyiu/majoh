@@ -41,7 +41,20 @@ PWA 設計 — 一個 codebase 喺 iPhone Safari、Android Chrome、桌面瀏覽
 4. 開 app,去 **設定** tab,paste 落「Gemini API Key」入面
 5. 撳「測試 API」確認通到
 
-免費 quota:Gemini 2.0 Flash 每分鐘 15 次、每日 1500 次,夠玩到飽。
+**2026 年免費 quota**(Google 2025/12 + 2026/4 改過):
+
+| Model | 每分鐘 | 每日 | 備註 |
+|-------|-------|------|------|
+| `gemini-2.5-flash-lite` ⭐ | 15 | **1000** | 預設,quota 最闊 |
+| `gemini-2.5-flash` | 10 | 250 | 更聰明少少 |
+| `gemini-3-flash` (preview) | 緊 | 緊 | 最新 |
+| `gemini-2.0-flash` | — | — | **2026/6/1 deprecated,唔好揀** |
+
+**429 quota exceeded 點算?**
+- 同一個 Google Cloud project 內所有 key 共用 quota — 如果你以前用過 Gemini,新 key 都係食同一個 daily 額度
+- 設定入面開 **Auto-fallback**,撞 quota 會自動轉去其他 model 試
+- Daily quota 每日香港時間早上 8:00 (UTC 0:00) reset
+- 真係要超大量,billing tier 1(綁卡但唔扣錢)起步 quota 高 100-200 倍
 
 ## 用法
 

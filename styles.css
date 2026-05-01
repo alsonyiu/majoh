@@ -379,6 +379,34 @@ h3 { font-size: 1rem; margin: 18px 0 8px; color: var(--text); }
 .history-card .hc-title { font-weight: 500; margin-bottom: 4px; }
 .history-card .hc-meta { color: var(--text-dim); font-size: 0.8rem; }
 
+/* -------- Tile picker -------- */
+.tile-picker {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  margin-bottom: 12px;
+}
+.tp-row {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.tp-row:last-of-type { border-bottom: 0; }
+.tp-row .tile {
+  cursor: pointer;
+  min-width: 28px; height: 36px;
+  font-size: 0.82rem;
+  padding: 0 3px;
+  user-select: none;
+  transition: transform 0.08s;
+}
+.tp-row .tile:active { transform: scale(0.9); }
+.tp-actions {
+  display: flex; gap: 8px; padding-top: 8px;
+  justify-content: flex-end;
+}
+
 /* -------- Toast -------- */
 .toast {
   position: fixed; left: 50%; bottom: calc(80px + var(--safe-bottom));

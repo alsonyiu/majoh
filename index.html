@@ -60,8 +60,8 @@
     <!-- ============== TAB: 影相計番 ============== -->
     <section class="tab-pane" id="tab-camera">
       <div class="camera-intro">
-        <h2>影相計番</h2>
-        <p class="muted">影張你嘅手牌相,AI 識牌之後即時計番數同顯示計法</p>
+        <h2>計番</h2>
+        <p class="muted">三種輸入方法:影相識牌、手動輸入、用示範牌試</p>
       </div>
 
       <div class="camera-actions">
@@ -69,6 +69,7 @@
           📷 影相 / 揀相
           <input type="file" accept="image/*" capture="environment" id="photo-input" hidden />
         </label>
+        <button class="btn btn-secondary big" id="btn-manual-input">✏️ 手動輸入</button>
         <button class="btn btn-ghost" id="btn-demo-tiles">🎲 用示範牌</button>
       </div>
 
@@ -118,7 +119,7 @@
         <h3>規則</h3>
         <div class="seg-control" data-setting="rules">
           <button data-value="canto" class="seg active">廣東牌 (13 張)</button>
-          <button data-value="taiwan">港式台牌 (16 張)</button>
+          <button data-value="taiwan" class="seg">港式台牌 (16 張)</button>
         </div>
       </div>
 
@@ -152,10 +153,16 @@
         <label class="row">
           <span>模型</span>
           <select id="set-model">
-            <option value="gemini-2.0-flash">Gemini 2.0 Flash (推薦,快+免費)</option>
-            <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-            <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+            <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite (推薦,免費 1000 次/日)</option>
+            <option value="gemini-2.5-flash">Gemini 2.5 Flash (免費 250 次/日)</option>
+            <option value="gemini-3-flash">Gemini 3 Flash (preview,quota 較緊)</option>
+            <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite (preview)</option>
+            <option value="gemini-2.0-flash">Gemini 2.0 Flash (2026/6 停用,唔好揀)</option>
           </select>
+        </label>
+        <label class="row">
+          <span>Auto-fallback (撞 quota 時自動轉 model)</span>
+          <input type="checkbox" id="set-auto-fallback" />
         </label>
         <button class="btn btn-ghost small" id="btn-test-api">測試 API</button>
         <div id="api-test-result" class="small"></div>
@@ -180,7 +187,7 @@
       <span class="nav-ico">🀄</span><span class="nav-lbl">計分</span>
     </button>
     <button class="nav-btn" data-tab="tab-camera">
-      <span class="nav-ico">📷</span><span class="nav-lbl">影相</span>
+      <span class="nav-ico">🀄</span><span class="nav-lbl">計番</span>
     </button>
     <button class="nav-btn" data-tab="tab-history">
       <span class="nav-ico">📜</span><span class="nav-lbl">記錄</span>
@@ -275,25 +282,47 @@
   <div class="modal hidden" id="modal-edit-tiles">
     <div class="modal-card big">
       <header class="modal-header">
-        <h3>修正牌張</h3>
+        <h3 id="edit-tiles-title">手動輸入牌張</h3>
         <button class="icon-btn" data-close-modal>✕</button>
       </header>
       <div class="modal-body">
-        <p class="small muted">用標準寫法用空格分開,例如:<code>1m 2m 3m 5p 5p 5p E E E 7s 8s 9s C C</code><br/>
-          1-9m=萬子,1-9p=筒子,1-9s=索子,E/S/W/N=東南西北,C/F/P=中發白</p>
-        <textarea id="tiles-text" rows="3"></textarea>
+        <p class="small muted" id="tiles-hint">
+          廣東牌:總共 14 張(包食糊張)。台牌:17 張。<br/>
+          撳下面個牌張就會加入手牌,撳兩下加 2 張,如此類推。
+        </p>
+
         <div class="field">
-          <label>食糊張</label>
-          <input type="text" id="tiles-winning" placeholder="例如 9s" />
+          <label>手牌 <span id="tiles-count" class="muted small"></span></label>
+          <textarea id="tiles-text" rows="2" placeholder="撳下面個牌張,或者直接打:1m 2m 3m..."></textarea>
         </div>
+
+        <div class="tile-picker" id="tile-picker">
+          <div class="tp-row" id="tp-m"></div>
+          <div class="tp-row" id="tp-p"></div>
+          <div class="tp-row" id="tp-s"></div>
+          <div class="tp-row" id="tp-z"></div>
+          <div class="tp-row" id="tp-flower"></div>
+          <div class="tp-actions">
+            <button class="btn btn-ghost small" id="btn-tile-clear">清空</button>
+            <button class="btn btn-ghost small" id="btn-tile-back">← 刪除最後</button>
+          </div>
+        </div>
+
         <div class="field">
-          <label>係咪自摸?</label>
-          <input type="checkbox" id="tiles-zimo" />
+          <label>食糊張(撳上面手牌入面任何一張就會自動填好)</label>
+          <input type="text" id="tiles-winning" placeholder="例如 9s,留空會用最後一張" />
+        </div>
+
+        <div class="field">
+          <label class="row" style="display:flex;align-items:center;gap:8px;padding:0;">
+            <input type="checkbox" id="tiles-zimo" />
+            <span>自摸糊牌</span>
+          </label>
         </div>
       </div>
       <footer class="modal-footer">
         <button class="btn btn-ghost" data-close-modal>取消</button>
-        <button class="btn btn-primary" id="btn-recalc">重新計算</button>
+        <button class="btn btn-primary" id="btn-recalc">計算番數</button>
       </footer>
     </div>
   </div>

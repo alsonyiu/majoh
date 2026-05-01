@@ -1,10 +1,25 @@
 /* ============================================================
  * Vision (識牌) - vision.js
  * 用 Google Gemini API (免費 tier) 由相片識別麻雀牌
+ *
+ * 注意 (2026-05 update):
+ *   - gemini-2.0-flash 2026/6/1 deprecated,唔好用
+ *   - 而家免費 tier 最闊係 gemini-2.5-flash-lite (15 RPM / 1000 次/日)
+ *   - gemini-2.5-flash (10 RPM / 250 次/日) 次選
+ *   - 多個 API key 喺同一個 Google Cloud project 共用 quota
  * ============================================================ */
 
 (function (global) {
   'use strict';
+
+  // 由 quota 多到少排序,auto-fallback 順住降級
+  const FALLBACK_CHAIN = [
+    'gemini-2.5-flash-lite',
+    'gemini-2.5-flash',
+    'gemini-3.1-flash-lite',
+    'gemini-3-flash',
+    'gemini-2.0-flash', // 過渡期最後 fallback
+  ];
 
   const PROMPT = `你係一個麻雀牌識別助手。睇住呢張相,搵出所有可見嘅麻雀牌張。
 
@@ -38,14 +53,58 @@
 - 中=紅中(紅色字), 發=青發(綠色字 發), 白=白板(空白或框)
 - 一定要 return valid JSON,冇任何前後文字`;
 
-  async function recognizeTiles(imageBlob, apiKey, model) {
+  async function callGemini(model, body, apiKey) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      const err = new Error(buildFriendlyError(res.status, errText, model));
+      err.status = res.status;
+      err.raw = errText;
+      throw err;
+    }
+    return res.json();
+  }
+
+  function buildFriendlyError(status, text, model) {
+    const lower = (text || '').toLowerCase();
+    if (status === 429) {
+      if (lower.includes('quota') || lower.includes('exceeded')) {
+        return `Quota 用完 (model: ${model})。
+
+可能原因:
+• 同一個 Google Cloud project 嘅其他 key/app 食咗 quota
+• 揀咗 quota 較緊嘅 model — 試下「Gemini 2.5 Flash-Lite」(每日 1000 次)
+• 等聽日 quota reset (UTC 0:00 = 香港時間早上 8:00)
+
+修正方法:
+1. 設定 → 模型 → 揀「Gemini 2.5 Flash-Lite」
+2. 開「Auto-fallback」自動試其他 model
+3. 確認你嘅 API key 喺 https://aistudio.google.com/app/apikey 仲 valid
+
+詳情:${text.slice(0, 200)}`;
+      }
+      return `太密 (429,model: ${model}):每分鐘上限到。等 30 秒再試。`;
+    }
+    if (status === 403) return `403 Forbidden (model: ${model}):個 key 冇權用呢個 model,或者要先去 ai.google.dev 同意 terms。`;
+    if (status === 400) return `400 Bad Request (model: ${model}):可能個 model 唔存在或 prompt 太大。${text.slice(0, 150)}`;
+    if (status === 404) return `404:model "${model}" 唔存在或者唔再 support。`;
+    if (status === 500 || status === 503) return `Google 暫時掛 (${status}),等陣再試。`;
+    return `(${status}) ${text.slice(0, 200)}`;
+  }
+
+  async function recognizeTiles(imageBlob, apiKey, model, opts) {
     if (!apiKey) throw new Error('未設定 Gemini API Key');
-    model = model || 'gemini-2.0-flash';
+    opts = opts || {};
+    const useFallback = !!opts.autoFallback;
+    const startModel = model || FALLBACK_CHAIN[0];
 
     const base64 = await blobToBase64(imageBlob);
     const mimeType = imageBlob.type || 'image/jpeg';
-
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
     const body = {
       contents: [{
         parts: [
@@ -59,45 +118,53 @@
       }
     };
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '');
-      throw new Error(`Gemini API 錯誤 (${res.status}): ${errText.slice(0, 200)}`);
+    const tried = [];
+    const chain = buildTryChain(startModel, useFallback);
+    let lastErr;
+    for (const m of chain) {
+      try {
+        if (opts.onAttempt) opts.onAttempt(m);
+        const data = await callGemini(m, body, apiKey);
+        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        const cleaned = stripCodeFence(text);
+        let parsed;
+        try {
+          parsed = JSON.parse(cleaned);
+        } catch (e) {
+          throw new Error(`Gemini 返嘅唔係 valid JSON (model: ${m}): ${cleaned.slice(0, 100)}`);
+        }
+        const out = normalizeRecognized(parsed);
+        out._modelUsed = m;
+        out._fallbackTrail = tried;
+        return out;
+      } catch (e) {
+        tried.push(m);
+        lastErr = e;
+        // 只有 429/403/404 先值得 fallback
+        if (!useFallback || ![429, 403, 404].includes(e.status)) {
+          throw e;
+        }
+        // 否則繼續試下個 model
+      }
     }
-    const data = await res.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    const cleaned = stripCodeFence(text);
-    let parsed;
-    try {
-      parsed = JSON.parse(cleaned);
-    } catch (e) {
-      throw new Error('Gemini 返嘅唔係有效 JSON: ' + cleaned.slice(0, 100));
-    }
-    return normalizeRecognized(parsed);
+    throw lastErr || new Error('全部 model 試完都唔得');
+  }
+
+  function buildTryChain(start, useFallback) {
+    if (!useFallback) return [start];
+    const idx = FALLBACK_CHAIN.indexOf(start);
+    if (idx === -1) return [start, ...FALLBACK_CHAIN];
+    return [start, ...FALLBACK_CHAIN.filter((_, i) => i !== idx)];
   }
 
   async function testApi(apiKey, model) {
     if (!apiKey) throw new Error('未設定 API Key');
-    model = model || 'gemini-2.0-flash';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    model = model || FALLBACK_CHAIN[0];
     const body = {
       contents: [{ parts: [{ text: '回答只可以係:OK' }] }],
       generationConfig: { temperature: 0 }
     };
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-    if (!res.ok) {
-      const t = await res.text().catch(() => '');
-      throw new Error(`(${res.status}) ${t.slice(0, 200)}`);
-    }
-    const data = await res.json();
+    const data = await callGemini(model, body, apiKey);
     return data?.candidates?.[0]?.content?.parts?.[0]?.text || '(空白)';
   }
 
@@ -142,7 +209,6 @@
     if (/^[1-9][mps]$/i.test(x)) return x.toLowerCase();
     if (/^[ESWNCFP]$/i.test(x)) return x.toUpperCase();
     if (/^[fs][1-4]$/i.test(x)) return x.toLowerCase();
-    // 中文 fallback
     const cnMap = {
       '東': 'E', '南': 'S', '西': 'W', '北': 'N',
       '中': 'C', '紅中': 'C', '發': 'F', '白': 'P', '白板': 'P',
@@ -205,7 +271,8 @@
   global.Vision = {
     recognizeTiles,
     testApi,
-    DEMO_HANDS
+    DEMO_HANDS,
+    FALLBACK_CHAIN,
   };
 
 })(typeof window !== 'undefined' ? window : globalThis);
